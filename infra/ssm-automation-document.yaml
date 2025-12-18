@@ -1,0 +1,62 @@
+schemaVersion: '0.3'
+description: "Stop EC2 instances tagged AutoStop=true when budget threshold is exceeded"
+assumeRole: "{{ AutomationAssumeRole }}"
+
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: "IAM role ARN that Automation assumes"
+  TagKey:
+    type: String
+    default: "AutoStop"
+  TagValue:
+    type: String
+    default: "true"
+  Region:
+    type: String
+    default: "{{global:REGION}}"
+
+mainSteps:
+  - name: StopTaggedInstances
+    action: aws:executeScript
+    timeoutSeconds: 600
+    inputs:
+      Runtime: python3.8
+      Handler: handler
+      InputPayload:
+        TagKey: "{{ TagKey }}"
+        TagValue: "{{ TagValue }}"
+        Region: "{{ Region }}"
+      Script: |
+        import boto3
+        import json
+
+        def handler(event, context):
+            region = event["Region"]
+            tag_key = event["TagKey"]
+            tag_val = event["TagValue"]
+            ec2 = boto3.client("ec2", region_name=region)
+            resp = ec2.describe_instances(
+                Filters=[
+                    {"Name": f"tag:{tag_key}", "Values": [tag_val]},
+                    {"Name": "instance-state-name", "Values": ["pending", "running"]},
+                ]
+            )
+            to_stop = []
+            for r in resp.get("Reservations", []):
+                for i in r.get("Instances", []):
+                    to_stop.append(i["InstanceId"])
+            if to_stop:
+                ec2.stop_instances(InstanceIds=to_stop)
+                return {"stopped": to_stop, "count": len(to_stop)}
+            else:
+                return {"stopped": [], "count": 0}
+
+outputs:
+  - Name: StoppedInstanceIds
+    Selector: $.Payload.stopped
+    Type: StringList
+  - Name: StoppedCount
+    Selector: $.Payload.count
+    Type: Integer
+

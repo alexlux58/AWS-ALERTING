@@ -1,0 +1,40 @@
+# AWS Cost Alerting Configuration
+# Copy this file to terraform.tfvars and fill in your values
+
+project_name = "cost-alerting"
+environment   = "production"
+aws_region    = "us-east-1"
+
+# Schedule configuration
+schedule_timezone = "America/Los_Angeles"
+schedule_cron     = "cron(0 20 * * ? *)"  # 8:00 PM daily
+
+# Email configuration
+report_to   = "your-email@example.com"  # Email to receive reports
+report_from = "your-email@example.com"  # Email to send from (must be verified)
+
+# SES configuration
+ses_sandbox_mode = true  # Set to false after SES is out of sandbox
+
+# Report configuration
+top_n_services  = 10
+include_mtd     = true
+include_drivers = true
+
+# Archive configuration
+archive_retention_days = 365
+
+# Budget configuration
+budget_limit_amount = "50"  # Monthly budget in USD
+budget_threshold_80 = 80    # Alert at 80% of budget
+budget_threshold_100 = 100  # Alert at 100% of budget
+
+# Lambda configuration
+lambda_timeout   = 300
+lambda_memory_size = 256
+
+# Monitoring
+log_retention_days = 30
+scheduler_retry_attempts = 2
+enable_custom_metrics = true
+
