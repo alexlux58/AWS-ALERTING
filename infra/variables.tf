@@ -24,8 +24,8 @@ variable "schedule_timezone" {
 
 variable "schedule_cron" {
   type        = string
-  default     = "cron(0 20 * * ? *)"
-  description = "Cron expression for daily schedule (8:00 PM PT)"
+  default     = "cron(0 7 * * ? *)"
+  description = "Cron expression for daily schedule (7:00 AM PT)"
 }
 
 variable "report_to" {

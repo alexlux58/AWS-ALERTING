@@ -30,7 +30,7 @@ output "budget_sns_topic" {
 
 output "scheduler_schedule_arn" {
   description = "ARN of the EventBridge Scheduler schedule"
-  value       = aws_scheduler_schedule.daily_8pm.arn
+  value       = aws_scheduler_schedule.daily_7am.arn
 }
 
 output "scheduler_dlq_arn" {

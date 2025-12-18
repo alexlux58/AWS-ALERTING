@@ -7,7 +7,7 @@ aws_region    = "us-east-1"
 
 # Schedule configuration
 schedule_timezone = "America/Los_Angeles"
-schedule_cron     = "cron(0 20 * * ? *)"  # 8:00 PM daily
+schedule_cron     = "cron(0 7 * * ? *)"  # 7:00 AM daily
 
 # Email configuration
 report_to   = "your-email@example.com"  # Email to receive reports

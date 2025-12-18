@@ -27,8 +27,8 @@ resource "aws_sqs_queue_policy" "scheduler_dlq" {
 
 # Scheduler IAM role (already defined in iam.tf)
 # Scheduler schedule with retries and DLQ
-resource "aws_scheduler_schedule" "daily_8pm" {
-  name       = "${var.project_name}-daily-8pm"
+resource "aws_scheduler_schedule" "daily_7am" {
+  name       = "${var.project_name}-daily-7am"
   group_name = "default"
 
   schedule_expression          = var.schedule_cron
@@ -60,7 +60,7 @@ resource "aws_lambda_permission" "allow_scheduler" {
   action        = "lambda:InvokeFunction"
   function_name = aws_lambda_function.reporter.function_name
   principal     = "scheduler.amazonaws.com"
-  source_arn    = aws_scheduler_schedule.daily_8pm.arn
+  source_arn    = aws_scheduler_schedule.daily_7am.arn
 }
 
 # CloudWatch alarm for DLQ messages (indicates scheduler failures)
