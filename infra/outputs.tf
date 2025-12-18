@@ -20,7 +20,7 @@ output "reporter_lambda_arn" {
 
 output "remediation_lambda_name" {
   description = "Name of the remediation Lambda function"
-  value       = aws_lambda_function.remediation.function_name
+  value       = var.enable_remediation ? aws_lambda_function.remediation[0].function_name : null
 }
 
 output "budget_sns_topic" {
@@ -40,7 +40,7 @@ output "scheduler_dlq_arn" {
 
 output "automation_document_name" {
   description = "Name of the SSM Automation document"
-  value       = aws_ssm_document.stop_autostop_instances.name
+  value       = var.enable_remediation ? aws_ssm_document.stop_autostop_instances[0].name : null
 }
 
 output "ses_from_identity" {

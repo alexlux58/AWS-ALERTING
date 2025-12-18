@@ -3,6 +3,7 @@ import csv
 import io
 import json
 import logging
+import re
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 
@@ -169,21 +170,54 @@ def html_table(title, rows, total):
     """
 
 
+def html_to_text(html_body):
+    """Convert HTML email to plain text for better deliverability."""
+    # Simple HTML to text conversion
+    text = html_body
+    # Remove HTML tags
+    text = re.sub(r'<[^>]+>', '', text)
+    # Replace HTML entities
+    text = text.replace('&nbsp;', ' ')
+    text = text.replace('&amp;', '&')
+    text = text.replace('&lt;', '<')
+    text = text.replace('&gt;', '>')
+    # Clean up whitespace
+    text = re.sub(r'\n\s*\n', '\n\n', text)
+    return text.strip()
+
+
 def send_email(report_from, report_to, subject, html_body):
-    """Send email via SES."""
+    """Send email via SES with both HTML and plain text for better deliverability."""
+    logger.info(f"Attempting to send email from {report_from} to {report_to}")
+    logger.info(f"Subject: {subject}")
+    
     try:
-        ses.send_email(
+        # Generate plain text version
+        text_body = html_to_text(html_body)
+        logger.info(f"Generated plain text version (length: {len(text_body)})")
+        
+        logger.info(f"SES client region: {ses.meta.region_name}")
+        logger.info(f"Calling ses.send_email...")
+        
+        response = ses.send_email(
             Source=report_from,
             Destination={"ToAddresses": [report_to]},
             Message={
                 "Subject": {"Data": subject, "Charset": "UTF-8"},
-                "Body": {"Html": {"Data": html_body, "Charset": "UTF-8"}},
+                "Body": {
+                    "Html": {"Data": html_body, "Charset": "UTF-8"},
+                    "Text": {"Data": text_body, "Charset": "UTF-8"},
+                },
             },
         )
-        logger.info(f"Email sent to {report_to}")
+        message_id = response.get("MessageId", "unknown")
+        logger.info(f"Email sent successfully to {report_to} - SES MessageId: {message_id}")
         put_metric("EmailSent", 1)
+        return message_id
     except Exception as e:
-        logger.error(f"Failed to send email: {e}")
+        logger.error(f"Failed to send email: {e}", exc_info=True)
+        logger.error(f"Error type: {type(e).__name__}")
+        logger.error(f"Error details: {str(e)}")
         put_metric("EmailFailed", 1)
         raise
 
@@ -301,10 +335,13 @@ def lambda_handler(event, context):
     </body></html>
     """
 
-        subject = f"AWS Cost Report — {date_label} (daily by service)"
+        # Use simple ASCII subject to avoid encoding issues
+        subject = f"AWS Cost Report - {date_label} (daily by service)"
 
         # Send email
-        send_email(report_from, report_to, subject, html)
+        logger.info(f"About to send email. From: {report_from}, To: {report_to}, Subject: {subject}")
+        message_id = send_email(report_from, report_to, subject, html)
+        logger.info(f"Email sending completed. MessageId: {message_id}")
 
         # Emit success metric
         put_metric("ReportGenerated", 1)

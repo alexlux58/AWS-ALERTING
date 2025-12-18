@@ -228,6 +228,76 @@ aws lambda invoke \
 aws s3 ls s3://$(terraform output -raw archive_bucket)/reports/ --recursive
 ```
 
+### Step 5.5: Verify Everything is Working ✅
+
+After your first successful test, verify all components:
+
+**1. Check Email Delivery in Logs:**
+```bash
+aws logs tail /aws/lambda/cost-alerting-reporter \
+  --region us-east-1 \
+  --since 10m | grep -i "email sent"
+```
+
+**Expected output:**
+```
+Email sent successfully to your-email@example.com - SES MessageId: 0100019b2fb8da71-...
+```
+
+**2. Verify S3 Archive Files:**
+```bash
+# List all report files (replace with your bucket name)
+aws s3 ls s3://cost-alerting-{account-id}-us-east-1/reports/2025/12/16/ --recursive
+```
+
+**Expected files:**
+- `daily_by_service.csv`
+- `daily_by_service.json`
+- `daily_drivers_usage_type.csv`
+- `daily_drivers_usage_type.json`
+- `mtd_by_service.csv`
+- `mtd_by_service.json`
+
+**3. Check Daily Schedule Status:**
+```bash
+aws scheduler get-schedule \
+  --name cost-alerting-daily-8pm \
+  --group-name default \
+  --region us-east-1 \
+  --query 'State'
+```
+
+**Expected output:** `"ENABLED"`
+
+**4. View Lambda Response:**
+```bash
+cat /tmp/cost-report.json
+```
+
+**Expected output:**
+```json
+{
+  "ok": true,
+  "date": "2025-12-16",
+  "daily_total": 0.42,
+  "mtd_total": 29.42
+}
+```
+
+**5. Check CloudWatch Metrics (if enabled):**
+```bash
+aws cloudwatch get-metric-statistics \
+  --namespace cost-alerting \
+  --metric-name ReportGenerated \
+  --start-time $(date -u -v-1H +%Y-%m-%dT%H:%M:%S) \
+  --end-time $(date -u +%Y-%m-%dT%H:%M:%S) \
+  --period 3600 \
+  --statistics Sum \
+  --region us-east-1
+```
+
+**All checks passing?** 🎉 Your system is fully operational and will send daily reports automatically!
+
 ### Step 6: Set Up Remediation (Optional)
 
 If you want automatic EC2 instance stopping when budget is exceeded:
@@ -463,25 +533,239 @@ aws iam put-user-policy \
 
 ### ❌ Email Not Received
 
-**Check 1: SES Verification**
+**Most common issue:** Email identities not verified in SES.
+
+#### Step 1: Check SES Verification Status
+
 ```bash
+# Check if your email is verified
 aws ses get-identity-verification-attributes \
-  --identities your-email@example.com
+  --identities your-email@example.com \
+  --region us-east-1
 ```
 
-Look for `"VerificationStatus": "Success"`. If not verified, check your email inbox for verification link.
+**Expected output:**
+```json
+{
+    "VerificationAttributes": {
+        "your-email@example.com": {
+            "VerificationStatus": "Success",
+            "VerificationToken": "..."
+        }
+    }
+}
+```
 
-**Check 2: Lambda Logs**
+**If you see `"VerificationStatus": "Pending"`:**
+1. Check your email inbox (including spam/junk)
+2. Look for an email from `no-reply-aws@amazon.com` or `aws-verification@amazon.com`
+3. Click the verification link in the email
+4. Wait a few minutes and check again
+
+**If you don't see a verification email:**
+- Check spam/junk folder
+- Request a new verification email:
+  ```bash
+  aws ses verify-email-identity \
+    --email-address your-email@example.com \
+    --region us-east-1
+  ```
+
+#### Step 2: Check Lambda Logs
+
 ```bash
-aws logs tail /aws/lambda/cost-alerting-reporter --follow
+# View recent Lambda logs
+aws logs tail /aws/lambda/cost-alerting-reporter \
+  --region us-east-1 \
+  --since 30m \
+  --format short
 ```
 
-Look for SES errors or permission issues.
+**Look for:**
+- `Email sent successfully` - Email was sent successfully
+- `EmailFailed` - Email sending failed
+- `MessageRejected` - SES rejected the email
+- `EmailAddressNotVerifiedException` - Email not verified
 
-**Check 3: SES Sandbox Mode**
-If in sandbox mode, recipient must also be verified. Either:
-- Verify recipient email, OR
-- Request SES production access and set `ses_sandbox_mode = false`
+**Common errors:**
+- `EmailAddressNotVerifiedException`: Email not verified (see Step 1)
+- `MessageRejected`: Email address not verified or in sandbox mode
+- `AccessDenied`: IAM permissions issue
+
+#### Step 3: Verify SES Sandbox Mode
+
+If `ses_sandbox_mode = true` in your `terraform.tfvars`, you can only send to verified email addresses.
+
+**Check your configuration:**
+```bash
+cd infra
+grep ses_sandbox_mode terraform.tfvars
+```
+
+**If in sandbox mode:**
+- Both `report_from` AND `report_to` must be verified
+- You can only send to verified email addresses
+- To send to any email, request production access and set `ses_sandbox_mode = false`
+
+#### Step 4: Check Email in Spam/Junk Folder
+
+Sometimes emails go to spam. Check:
+- Spam/Junk folder
+- Promotions tab (Gmail)
+- All Mail folder
+
+#### Step 5: Test Email Sending Manually
+
+Test if SES can send emails directly:
+
+```bash
+aws ses send-email \
+  --from your-email@example.com \
+  --to your-email@example.com \
+  --subject "Test Email" \
+  --text "This is a test email" \
+  --region us-east-1
+```
+
+**If this fails:**
+- Email is not verified
+- Check error message for details
+
+**If this succeeds:**
+- SES is working
+- Issue is likely in Lambda code or configuration
+
+#### Step 6: Check SSM Parameter (Email Address)
+
+The Lambda reads the recipient email from SSM Parameter Store. Verify it's correct:
+
+```bash
+aws ssm get-parameter \
+  --name "/cost-alerting/report_to" \
+  --region us-east-1
+```
+
+**If the email is wrong**, update it:
+```bash
+aws ssm put-parameter \
+  --name "/cost-alerting/report_to" \
+  --type "String" \
+  --value "correct-email@example.com" \
+  --overwrite \
+  --region us-east-1
+```
+
+**Then verify the new email in SES** (see Step 1).
+
+#### Step 7: Check Lambda Environment Variables
+
+Verify the Lambda has the correct SES region:
+
+```bash
+aws lambda get-function-configuration \
+  --function-name cost-alerting-reporter \
+  --region us-east-1 \
+  --query 'Environment.Variables.SES_REGION'
+```
+
+Should return: `"us-east-1"`
+
+#### Step 8: Check IAM Permissions
+
+Verify the Lambda role has SES permissions:
+
+```bash
+aws iam get-role-policy \
+  --role-name cost-alerting-reporter-lambda \
+  --policy-name cost-alerting-reporter-lambda-policy
+```
+
+**Look for:**
+- `ses:SendEmail` permission
+- Resource ARN should include your email identity
+
+#### Quick Fix Checklist
+
+- [ ] Email identity verified (check Step 1)
+- [ ] Both `report_from` and `report_to` verified (if sandbox mode)
+- [ ] Checked spam/junk folder
+- [ ] Lambda logs show no errors
+- [ ] SES can send test email (Step 5)
+- [ ] SSM parameter has correct email address (Step 6)
+
+#### Most Likely Solution
+
+**90% of the time, it's unverified email identities.**
+
+1. Check your inbox for verification emails
+2. Click the verification links
+3. Wait 2-3 minutes
+4. Test Lambda again
+
+### 📧 Changing Email Address
+
+#### Quick Method: Update SSM Parameter (No Redeploy)
+
+This updates the recipient email without redeploying Terraform.
+
+**Step 1: Verify New Email in SES**
+```bash
+aws ses verify-email-identity \
+  --email-address new-email@example.com \
+  --region us-east-1
+```
+
+**Important:** Check your inbox for the verification email and click the link!
+
+**Step 2: Update SSM Parameter**
+```bash
+aws ssm put-parameter \
+  --name "/cost-alerting/report_to" \
+  --type "String" \
+  --value "new-email@example.com" \
+  --overwrite \
+  --region us-east-1
+```
+
+**Step 3: Test**
+```bash
+aws lambda invoke \
+  --function-name cost-alerting-reporter \
+  --region us-east-1 \
+  --payload '{}' \
+  /tmp/cost-report.json
+```
+
+#### Permanent Method: Update Terraform Config
+
+**Step 1: Update terraform.tfvars**
+```bash
+cd infra
+# Edit terraform.tfvars
+# Change:
+report_to = "new-email@example.com"
+```
+
+**Step 2: Verify Email in SES**
+```bash
+aws ses verify-email-identity \
+  --email-address new-email@example.com \
+  --region us-east-1
+```
+
+Check your inbox for verification email and click the link.
+
+**Step 3: Apply Terraform**
+```bash
+terraform apply
+```
+
+This will:
+- Update the SSM parameter
+- Update SES identity (if needed)
+- Keep everything in sync
+
+**Note:** If in SES sandbox mode, you need to verify BOTH `report_from` and `report_to` email addresses.
 
 ### ❌ Lambda Not Receiving Invocations
 
@@ -489,8 +773,12 @@ If in sandbox mode, recipient must also be verified. Either:
 ```bash
 aws scheduler get-schedule \
   --name cost-alerting-daily-8pm \
-  --schedule-group default
+  --group-name default \
+  --region us-east-1 \
+  --query 'State'
 ```
+
+Should return: `"ENABLED"`
 
 **Check DLQ for failures:**
 ```bash
@@ -513,6 +801,91 @@ If you see YAML parsing errors:
 - Ensure `infra/ssm-automation-document.yaml` exists
 - Check YAML syntax is valid
 - Verify file encoding is UTF-8
+
+### 🔍 Verifying Infrastructure in AWS Console
+
+Use this checklist to verify all resources were created successfully:
+
+#### Lambda Functions
+**Location:** AWS Console → Lambda → Functions
+
+**Expected:**
+- ✅ `cost-alerting-reporter` - Main cost reporting function
+- ✅ `cost-alerting-remediation` - Budget remediation function (if enabled)
+
+**Check:** Both functions exist, status is "Active", environment variables are set correctly.
+
+#### S3 Buckets
+**Location:** AWS Console → S3 → Buckets
+
+**Expected:**
+- ✅ `cost-alerting-{account-id}-{region}`
+
+**Check:** Bucket exists, versioning enabled, encryption configured, public access blocked.
+
+#### EventBridge Scheduler
+**Location:** AWS Console → EventBridge → Schedules
+
+**Expected:**
+- ✅ `cost-alerting-daily-8pm` - Schedule is enabled
+
+**Check:** Schedule exists, target is correct Lambda function, retry policy configured.
+
+#### SES Email Identities
+**Location:** AWS Console → SES → Verified identities
+
+**Expected:**
+- ✅ `report_from` email - Status: "Verified"
+- ✅ `report_to` email - Status: "Verified" (if sandbox mode)
+
+**Check:** Both email addresses are verified. If not, check your inbox for verification links.
+
+#### SSM Parameters
+**Location:** AWS Console → Systems Manager → Parameter Store
+
+**Expected:**
+- ✅ `/cost-alerting/report_to`
+- ✅ `/cost-alerting/report_from`
+- ✅ `/cost-alerting/archive_bucket`
+- ✅ `/cost-alerting/top_n_services`
+- ✅ `/cost-alerting/include_mtd`
+- ✅ `/cost-alerting/include_drivers`
+
+**Check:** All 6 parameters exist with correct values.
+
+#### CloudWatch Alarms
+**Location:** AWS Console → CloudWatch → Alarms
+
+**Expected:**
+- ✅ `cost-alerting-reporter-errors`
+- ✅ `cost-alerting-reporter-duration`
+- ✅ `cost-alerting-reporter-no-metrics` (if custom metrics enabled)
+- ✅ `cost-alerting-scheduler-dlq-messages`
+- ✅ `cost-alerting-remediation-errors` (if remediation enabled)
+
+**Check:** All alarms exist, state is "OK" (if system is healthy).
+
+#### Quick Verification Commands
+
+```bash
+# Lambda functions
+aws lambda list-functions --query 'Functions[?contains(FunctionName, `cost-alerting`)].FunctionName'
+
+# S3 buckets
+aws s3 ls | grep cost-alerting
+
+# EventBridge Scheduler
+aws scheduler list-schedules --schedule-group default --query 'Schedules[?contains(Name, `cost-alerting`)].Name'
+
+# SES identities
+aws ses list-identities --query 'Identities'
+
+# SSM parameters
+aws ssm describe-parameters --parameter-filters "Key=Name,Values=/cost-alerting/" --query 'Parameters[*].Name'
+
+# CloudWatch alarms
+aws cloudwatch describe-alarms --alarm-name-prefix cost-alerting --query 'MetricAlarms[*].AlarmName'
+```
 
 ## Terraform Infrastructure Explained
 

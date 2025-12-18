@@ -50,43 +50,49 @@ resource "aws_lambda_function" "reporter" {
   tags = local.common_tags
 }
 
-# CloudWatch Log Group for remediation Lambda
+# CloudWatch Log Group for remediation Lambda (only if remediation enabled)
 resource "aws_cloudwatch_log_group" "remediation" {
+  count = var.enable_remediation ? 1 : 0
+
   name              = "/aws/lambda/${var.project_name}-remediation"
   retention_in_days = var.log_retention_days
 
   tags = local.common_tags
 }
 
-# Archive remediation Lambda code
+# Archive remediation Lambda code (only if remediation enabled)
 data "archive_file" "remediation_zip" {
+  count = var.enable_remediation ? 1 : 0
+
   type        = "zip"
   source_file = "${path.module}/../cost_remediation_lambda/app.py"
   output_path = "${path.module}/.build/remediation.zip"
 }
 
-# Remediation Lambda function
+# Remediation Lambda function (only if remediation enabled)
 resource "aws_lambda_function" "remediation" {
+  count = var.enable_remediation ? 1 : 0
+
   function_name = "${var.project_name}-remediation"
-  role          = aws_iam_role.remediation_lambda.arn
+  role          = aws_iam_role.remediation_lambda[0].arn
   handler       = "app.lambda_handler"
   runtime       = "python3.11"
   timeout       = 60
   memory_size   = 128
 
-  filename         = data.archive_file.remediation_zip.output_path
-  source_code_hash = data.archive_file.remediation_zip.output_base64sha256
+  filename         = data.archive_file.remediation_zip[0].output_path
+  source_code_hash = data.archive_file.remediation_zip[0].output_base64sha256
 
   environment {
     variables = {
-      AUTOMATION_DOC_NAME        = aws_ssm_document.stop_autostop_instances.name
-      AUTOMATION_ASSUME_ROLE_ARN = aws_iam_role.automation_assume_role.arn
+      AUTOMATION_DOC_NAME        = aws_ssm_document.stop_autostop_instances[0].name
+      AUTOMATION_ASSUME_ROLE_ARN = aws_iam_role.automation_assume_role[0].arn
     }
   }
 
   depends_on = [
-    aws_cloudwatch_log_group.remediation,
-    aws_iam_role_policy.remediation_lambda
+    aws_cloudwatch_log_group.remediation[0],
+    aws_iam_role_policy.remediation_lambda[0]
   ]
 
   tags = local.common_tags

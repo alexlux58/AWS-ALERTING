@@ -133,8 +133,10 @@ resource "aws_iam_role_policy" "scheduler_invoke_lambda" {
   })
 }
 
-# IAM role for SSM Automation
+# IAM role for SSM Automation (only if remediation enabled)
 resource "aws_iam_role" "automation_assume_role" {
+  count = var.enable_remediation ? 1 : 0
+
   name = "${var.project_name}-automation-assume"
 
   assume_role_policy = jsonencode({
@@ -154,8 +156,10 @@ resource "aws_iam_role" "automation_assume_role" {
 }
 
 resource "aws_iam_role_policy" "automation_assume_role" {
+  count = var.enable_remediation ? 1 : 0
+
   name = "${var.project_name}-automation-assume-policy"
-  role = aws_iam_role.automation_assume_role.id
+  role = aws_iam_role.automation_assume_role[0].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -180,8 +184,10 @@ resource "aws_iam_role_policy" "automation_assume_role" {
   })
 }
 
-# IAM role for remediation Lambda
+# IAM role for remediation Lambda (only if remediation enabled)
 resource "aws_iam_role" "remediation_lambda" {
+  count = var.enable_remediation ? 1 : 0
+
   name = "${var.project_name}-remediation-lambda"
 
   assume_role_policy = jsonencode({
@@ -201,8 +207,10 @@ resource "aws_iam_role" "remediation_lambda" {
 }
 
 resource "aws_iam_role_policy" "remediation_lambda" {
+  count = var.enable_remediation ? 1 : 0
+
   name = "${var.project_name}-remediation-lambda-policy"
-  role = aws_iam_role.remediation_lambda.id
+  role = aws_iam_role.remediation_lambda[0].id
 
   policy = jsonencode({
     Version = "2012-10-17"
@@ -213,12 +221,12 @@ resource "aws_iam_role_policy" "remediation_lambda" {
           "logs:CreateLogStream",
           "logs:PutLogEvents"
         ]
-        Resource = "${aws_cloudwatch_log_group.remediation.arn}:*"
+        Resource = "${aws_cloudwatch_log_group.remediation[0].arn}:*"
       },
       {
         Effect   = "Allow"
         Action   = ["ssm:StartAutomationExecution"]
-        Resource = aws_ssm_document.stop_autostop_instances.arn
+        Resource = aws_ssm_document.stop_autostop_instances[0].arn
       }
     ]
   })

@@ -122,3 +122,9 @@ variable "enable_opsitem_alarms" {
   description = "Enable OpsCenter OpsItem creation on alarms (requires OpsCenter to be enabled)"
 }
 
+variable "enable_remediation" {
+  type        = bool
+  default     = false
+  description = "Enable automated EC2 instance remediation (requires SSM Automation document)"
+}
+

@@ -60,8 +60,10 @@ resource "aws_cloudwatch_metric_alarm" "reporter_no_metrics" {
   tags = local.common_tags
 }
 
-# CloudWatch alarm for remediation Lambda errors
+# CloudWatch alarm for remediation Lambda errors (only if remediation enabled)
 resource "aws_cloudwatch_metric_alarm" "remediation_errors" {
+  count = var.enable_remediation ? 1 : 0
+
   alarm_name          = "${var.project_name}-remediation-errors"
   alarm_description   = "Alerts when remediation Lambda errors"
   namespace           = "AWS/Lambda"
@@ -74,7 +76,7 @@ resource "aws_cloudwatch_metric_alarm" "remediation_errors" {
   treat_missing_data  = "notBreaching"
 
   dimensions = {
-    FunctionName = aws_lambda_function.remediation.function_name
+    FunctionName = aws_lambda_function.remediation[0].function_name
   }
 
   alarm_actions = local.opsitem_action_arn != null ? [local.opsitem_action_arn] : []

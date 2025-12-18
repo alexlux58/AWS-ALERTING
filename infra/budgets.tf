@@ -42,18 +42,22 @@ resource "aws_budgets_budget" "monthly_cost" {
   tags = local.common_tags
 }
 
-# SNS subscription for Lambda (remediation)
+# SNS subscription for Lambda (remediation) - only if remediation enabled
 resource "aws_sns_topic_subscription" "budget_to_lambda" {
+  count = var.enable_remediation ? 1 : 0
+
   topic_arn = aws_sns_topic.budget_alerts.arn
   protocol  = "lambda"
-  endpoint  = aws_lambda_function.remediation.arn
+  endpoint  = aws_lambda_function.remediation[0].arn
 }
 
-# Lambda permission for SNS
+# Lambda permission for SNS - only if remediation enabled
 resource "aws_lambda_permission" "allow_sns_invoke_remediation" {
+  count = var.enable_remediation ? 1 : 0
+
   statement_id  = "AllowSNSInvokeRemediation"
   action        = "lambda:InvokeFunction"
-  function_name = aws_lambda_function.remediation.function_name
+  function_name = aws_lambda_function.remediation[0].function_name
   principal     = "sns.amazonaws.com"
   source_arn    = aws_sns_topic.budget_alerts.arn
 }

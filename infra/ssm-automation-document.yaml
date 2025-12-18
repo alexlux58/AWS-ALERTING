@@ -53,10 +53,10 @@ mainSteps:
                 return {"stopped": [], "count": 0}
 
 outputs:
-  - name: StoppedInstanceIds
-    selector: $.Payload.stopped
-    type: StringList
-  - name: StoppedCount
-    selector: $.Payload.count
-    type: Integer
+  - Name: StoppedInstanceIds
+    Selector: $.Payload.stopped
+    Type: StringList
+  - Name: StoppedCount
+    Selector: $.Payload.count
+    Type: Integer
 

@@ -38,3 +38,6 @@ log_retention_days = 30
 scheduler_retry_attempts = 2
 enable_custom_metrics = true
 
+# Remediation configuration (optional - set to true to enable automated EC2 instance stopping)
+enable_remediation = false  # Set to true to enable SSM Automation for EC2 remediation
+
