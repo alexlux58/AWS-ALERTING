@@ -41,15 +41,22 @@ This is a **production-ready AWS cost monitoring and alerting system** that:
 ## Features
 
 ### 📧 Daily Cost Reports
-- **Automated emails** at 8:00 PM PT (configurable)
-- **Yesterday's costs** broken down by AWS service
-- **Month-to-date** spending summary
+- **Automated emails** at 7:00 AM PT (configurable)
+- **Yesterday's costs** broken down by AWS service with percentages
+- **Month-to-date** spending summary with daily average
+- **Day-over-day comparison** with trend indicators (↑ ↓ →)
+- **Week-over-week comparison** to identify patterns
+- **7-day sparkline** visual trend (▁▂▃▄▅▆▇█)
+- **Regional breakdown** showing costs by AWS region
 - **Usage type analysis** to identify cost drivers
+- **Quick insights** summary with key findings
 - **S3 archive** of JSON/CSV reports for historical analysis
 
 ### 💰 Budget Management
 - **Monthly budget** with configurable limit
+- **Visual progress bar** in email showing budget utilization
 - **Two alert thresholds**: 80% (warning) and 100% (critical)
+- **Projected monthly spend** based on current trends
 - **Email notifications** when thresholds are exceeded
 - **SNS integration** for custom alerting
 
@@ -65,6 +72,12 @@ This is a **production-ready AWS cost monitoring and alerting system** that:
 - **Dead Letter Queue** for failed invocations
 - **OpsCenter integration** for incident management
 
+### 📬 Email Deliverability
+- **Domain identity support** for better deliverability (DKIM, SPF, DMARC)
+- **Automatic DKIM signing** for authenticated emails
+- **Both HTML and plain text** versions for compatibility
+- **See [EMAIL_DELIVERABILITY.md](EMAIL_DELIVERABILITY.md)** for setup guide
+
 ## Architecture Overview
 
 ```
@@ -72,7 +85,7 @@ This is a **production-ready AWS cost monitoring and alerting system** that:
 │                    Daily Cost Reporting Flow                 │
 └─────────────────────────────────────────────────────────────┘
 
-EventBridge Scheduler (8 PM PT daily)
+EventBridge Scheduler (7 AM PT daily)
     ↓
 Lambda Function (Cost Reporter)
     ├─→ AWS Cost Explorer API (queries costs)
@@ -182,22 +195,51 @@ This will create:
 
 **Deployment takes ~2-3 minutes.**
 
-### Step 4: Verify Email Identities ⚠️ CRITICAL
+### Step 4: Verify Email/Domain Identity ⚠️ CRITICAL
 
 **This step is required!** Without it, emails won't be sent.
+
+#### Option A: Using Domain Identity (Recommended for better deliverability)
+
+If you're using a custom domain (e.g., `admin@yourdomain.com`), add DNS records:
+
+```bash
+# Get the DNS records to add
+terraform output -json dns_records
+```
+
+Add these records to your domain's DNS:
+1. **TXT record** for domain verification (`_amazonses.yourdomain.com`)
+2. **3 CNAME records** for DKIM signing
+3. **TXT record** for SPF (recommended)
+4. **TXT record** for DMARC (recommended)
+
+**Check domain verification status:**
+```bash
+aws ses get-identity-verification-attributes \
+  --identities yourdomain.com \
+  --region us-east-1
+```
+
+#### Option B: Using Email Identity
+
+If using an email address you don't control the domain for:
 
 1. **Check your email inbox** for verification emails from AWS SES
 2. **Click the verification links** for:
    - `report_from` email (required)
    - `report_to` email (if `ses_sandbox_mode = true`)
 
-**How to check if verified:**
+**Check email verification status:**
 ```bash
 aws ses get-identity-verification-attributes \
-  --identities your-email@example.com
+  --identities your-email@example.com \
+  --region us-east-1
 ```
 
 Look for `"VerificationStatus": "Success"`
+
+**📚 For detailed email setup, see [EMAIL_DELIVERABILITY.md](EMAIL_DELIVERABILITY.md)**
 
 ### Step 5: Test the System
 
@@ -331,7 +373,7 @@ All configuration is done via `terraform.tfvars`. Key variables:
 | `report_to` | Email to receive reports | **Required** |
 | `report_from` | Email to send from | **Required** |
 | `budget_limit_amount` | Monthly budget in USD | `"50"` |
-| `schedule_cron` | Cron expression for schedule | `"cron(0 20 * * ? *)"` (8 PM) |
+| `schedule_cron` | Cron expression for schedule | `"cron(0 7 * * ? *)"` (7 AM) |
 | `schedule_timezone` | Timezone (handles DST) | `"America/Los_Angeles"` |
 | `top_n_services` | Number of top services in report | `10` |
 | `include_mtd` | Include month-to-date breakdown | `true` |
@@ -372,11 +414,16 @@ Available parameters:
 
 ### Daily Cost Reporting
 
-1. **EventBridge Scheduler** triggers at 8:00 PM PT (configurable)
+1. **EventBridge Scheduler** triggers at 7:00 AM PT (configurable)
 2. **Lambda function** queries AWS Cost Explorer API for:
    - Yesterday's costs by service
+   - Day-before-yesterday (for day-over-day comparison)
+   - Same day last week (for week-over-week comparison)
+   - 7-day historical trend
    - Month-to-date costs
+   - Regional breakdown
    - Usage type drivers
+   - Budget status and forecast
 3. **Reports are generated** in JSON and CSV formats
 4. **Reports are archived** to S3 with date-based organization:
    ```
@@ -387,7 +434,15 @@ Available parameters:
      ├── mtd_by_service.csv
      └── daily_drivers_usage_type.json
    ```
-5. **Email is sent** via SES with HTML-formatted report
+5. **Email is sent** via SES with HTML-formatted report including:
+   - Summary cards with daily and MTD totals
+   - Day-over-day and week-over-week change indicators (↑ ↓ →)
+   - Visual 7-day sparkline trend
+   - Budget progress bar with utilization %
+   - Regional cost breakdown
+   - Service breakdown with percentages
+   - Cost drivers analysis
+   - Quick insights summary
 
 ### Budget Alerts & Remediation
 
@@ -530,6 +585,19 @@ aws iam put-user-policy \
   --policy-name cost-alerting-test \
   --policy-document file://terraform-policy.json
 ```
+
+### ❌ Email Going to Junk/Spam Folder
+
+**📚 For comprehensive email deliverability solutions, see [EMAIL_DELIVERABILITY.md](EMAIL_DELIVERABILITY.md)**
+
+**Quick fixes:**
+1. **Use a domain identity** instead of an email identity (enables DKIM, SPF, DMARC)
+2. **Request SES production access** (most important)
+3. **Verify DNS records** are properly configured:
+   ```bash
+   terraform output -json dns_records
+   ```
+4. **Add sender to safe senders** in your email client
 
 ### ❌ Email Not Received
 

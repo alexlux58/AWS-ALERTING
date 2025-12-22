@@ -39,6 +39,7 @@ resource "aws_lambda_function" "reporter" {
       PARAM_INCLUDE_DRIVERS = local.param_include_drivers
       ENABLE_METRICS        = tostring(var.enable_custom_metrics)
       METRICS_NAMESPACE     = var.project_name
+      BUDGET_NAME           = "${var.project_name}-monthly"  # For budget status in reports
     }
   }
 

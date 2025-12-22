@@ -44,12 +44,45 @@ output "automation_document_name" {
 }
 
 output "ses_from_identity" {
-  description = "SES email identity for sending reports"
-  value       = aws_ses_email_identity.from.email
+  description = "SES identity for sending reports (domain or email)"
+  value       = local.is_domain_identity ? aws_ses_domain_identity.from[0].domain : (length(aws_ses_email_identity.from) > 0 ? aws_ses_email_identity.from[0].email : null)
 }
 
 output "ses_to_identity" {
   description = "SES email identity for receiving reports (if sandbox mode)"
   value       = var.ses_sandbox_mode ? aws_ses_email_identity.to[0].email : null
 }
+
+output "dns_records" {
+  description = "DNS records required to verify and authenticate the domain"
+  value = local.is_domain_identity ? {
+    verification_record = {
+      name  = "_amazonses.${aws_ses_domain_identity.from[0].domain}"
+      type  = "TXT"
+      value = aws_ses_domain_identity.from[0].verification_token
+    }
+    dkim_records = [
+      for token in aws_ses_domain_dkim.from[0].dkim_tokens : {
+        name  = "${token}._domainkey.${aws_ses_domain_identity.from[0].domain}"
+        type  = "CNAME"
+        value = "${token}.dkim.amazonses.com"
+      }
+    ]
+    spf_record = {
+      name  = aws_ses_domain_identity.from[0].domain
+      type  = "TXT"
+      value = "v=spf1 include:amazonses.com ~all"
+      note  = "Optional but recommended for better deliverability"
+    }
+    dmarc_record = {
+      name  = "_dmarc.${aws_ses_domain_identity.from[0].domain}"
+      type  = "TXT"
+      value = "v=DMARC1; p=quarantine; rua=mailto:${var.report_from}"
+      note  = "Optional but recommended for better deliverability"
+    }
+  } : null
+}
+
+# Note: Use 'terraform output -json dns_records' to get the DNS records needed
+# for domain verification. See EMAIL_DELIVERABILITY.md for setup instructions.
 

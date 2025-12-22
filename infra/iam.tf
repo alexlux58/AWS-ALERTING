@@ -60,23 +60,45 @@ resource "aws_iam_role_policy" "reporter_lambda" {
         Resource = "${aws_s3_bucket.archive.arn}/*"
       },
       # Send email via SES (scoped to verified identities)
+      # For domain identity: allow sending from the domain and the specific email address
       {
         Effect = "Allow"
         Action = [
           "ses:SendEmail",
           "ses:SendRawEmail"
         ]
-        Resource = [
-          aws_ses_email_identity.from.arn,
-          var.ses_sandbox_mode ? aws_ses_email_identity.to[0].arn : "*"
-        ]
+        Resource = concat(
+          local.is_domain_identity ? [
+            aws_ses_domain_identity.from[0].arn,
+            "arn:aws:ses:${var.aws_region}:${data.aws_caller_identity.current.account_id}:identity/${var.report_from}"
+          ] : (length(aws_ses_email_identity.from) > 0 ? [aws_ses_email_identity.from[0].arn] : []),
+          var.ses_sandbox_mode ? [aws_ses_email_identity.to[0].arn] : ["*"]
+        )
       },
       # Cost Explorer API (must be in us-east-1)
       {
         Effect = "Allow"
         Action = [
           "ce:GetCostAndUsage",
+          "ce:GetCostForecast",
           "ce:GetDimensionValues"
+        ]
+        Resource = "*"
+      },
+      # Budgets API (for budget status)
+      {
+        Effect = "Allow"
+        Action = [
+          "budgets:DescribeBudget",
+          "budgets:ViewBudget"
+        ]
+        Resource = "arn:aws:budgets::${data.aws_caller_identity.current.account_id}:budget/${var.project_name}-monthly"
+      },
+      # STS (for getting account ID)
+      {
+        Effect = "Allow"
+        Action = [
+          "sts:GetCallerIdentity"
         ]
         Resource = "*"
       },
