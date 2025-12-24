@@ -221,15 +221,26 @@ def get_budget_status():
 
 
 def get_cost_forecast(start: date, end: date):
-    """Get AWS cost forecast for the period."""
+    """Get AWS cost forecast for the period.
+    Returns the forecasted total cost for the period (mean value).
+    """
     try:
         resp = ce.get_cost_forecast(
             TimePeriod={"Start": start.isoformat(), "End": end.isoformat()},
             Metric="UNBLENDED_COST",
             Granularity="MONTHLY",
         )
-        total = money(resp.get("Total", {}).get("Amount", "0"))
-        return total
+        # Cost Explorer forecast returns ForecastResultsByTime array
+        # For monthly granularity, we typically get one result
+        # Use MeanValue for the forecast
+        if resp.get("ForecastResultsByTime"):
+            # Sum all forecast periods (usually just one for monthly)
+            total = 0.0
+            for result in resp["ForecastResultsByTime"]:
+                mean_value = result.get("MeanValue", {}).get("Amount", "0")
+                total += money(mean_value)
+            return total
+        return 0.0
     except Exception as e:
         logger.warning(f"Failed to get cost forecast: {e}")
         return None
@@ -470,9 +481,16 @@ def lambda_handler(event, context):
         # Get budget status
         budget_info = get_budget_status()
         
-        # Get AWS cost forecast (for rest of month)
-        end_of_month = (start.replace(day=28) + timedelta(days=4)).replace(day=1)
-        aws_forecast = get_cost_forecast(end, end_of_month)
+        # Calculate first day of current month and first day of next month
+        month_start = start.replace(day=1)
+        if start.month == 12:
+            next_month = start.replace(year=start.year + 1, month=1, day=1)
+        else:
+            next_month = start.replace(month=start.month + 1, day=1)
+        
+        # Get AWS cost forecast for the entire month (from month start to month end)
+        # This gives us the total forecasted spend for the month
+        aws_forecast = get_cost_forecast(month_start, next_month) if include_mtd else None
 
         # Drivers: usage types (overall yesterday, single day)
         d_rows = []
@@ -544,22 +562,30 @@ def lambda_handler(event, context):
         wow_formatted = format_change(wow_change, wow_arrow)
         
         # Build budget progress bar HTML
+        # Use MTD total from Cost Explorer for consistency, not Budgets API actual
         budget_html = ""
-        if budget_info:
-            utilization = budget_info["utilization"]
+        if budget_info and include_mtd:
+            # Use MTD total instead of Budgets API actual for consistency
+            budget_actual = mtd_total
+            budget_limit = budget_info["limit"]
+            utilization = (budget_actual / budget_limit * 100) if budget_limit > 0 else 0
+            
+            # Use Cost Explorer forecast if available, otherwise fall back to Budgets forecast
+            forecasted_spend = aws_forecast if aws_forecast is not None else budget_info.get("forecasted", 0)
+            
             bar_color = "#28a745" if utilization < 80 else ("#ffc107" if utilization < 100 else "#dc3545")
             budget_html = f'''
             <div style="background: #f8f9fa; padding: 16px; border-radius: 6px; margin-bottom: 20px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <div style="font-size: 14px; font-weight: 600;">📊 Budget Status: {budget_info["name"]}</div>
-                <div style="font-size: 14px; color: #666;">${budget_info["actual"]:,.2f} / ${budget_info["limit"]:,.2f}</div>
+                <div style="font-size: 14px; color: #666;">${budget_actual:,.2f} / ${budget_limit:,.2f}</div>
               </div>
               <div style="background: #e9ecef; border-radius: 4px; height: 20px; overflow: hidden;">
                 <div style="background: {bar_color}; height: 100%; width: {min(utilization, 100):.1f}%; transition: width 0.3s;"></div>
               </div>
               <div style="display: flex; justify-content: space-between; margin-top: 8px; font-size: 12px; color: #666;">
                 <div>{utilization:.1f}% used</div>
-                <div>Forecasted: ${budget_info["forecasted"]:,.2f}</div>
+                <div>Forecasted (EOM): ${forecasted_spend:,.2f}</div>
               </div>
             </div>
             '''
@@ -652,7 +678,7 @@ def lambda_handler(event, context):
           <li><b>Top cost driver:</b> {y_rows[0][0] if y_rows else 'N/A'} (${y_rows[0][1]:,.2f})</li>
           {f'<li><b>Day-over-day:</b> {"Increased" if dod_change > 5 else "Decreased" if dod_change < -5 else "Stable"} ({dod_arrow} {abs(dod_change):.1f}%)</li>' if prev_total > 0 else ''}
           {f'<li><b>Week-over-week:</b> {"Increased" if wow_change > 5 else "Decreased" if wow_change < -5 else "Stable"} ({wow_arrow} {abs(wow_change):.1f}%)</li>' if wow_total > 0 else ''}
-          {f'<li><b>Budget utilization:</b> {budget_info["utilization"]:.1f}% of ${budget_info["limit"]:,.2f} monthly budget</li>' if budget_info else ''}
+          {f'<li><b>Budget utilization:</b> {(mtd_total / budget_info["limit"] * 100):.1f}% of ${budget_info["limit"]:,.2f} monthly budget (${mtd_total:,.2f} spent)</li>' if (budget_info and include_mtd) else ''}
           {f'<li><b>On track for:</b> ${projected_monthly:,.2f} this month (based on {days_elapsed}-day average)</li>' if include_mtd else ''}
         </ul>
       </div>
