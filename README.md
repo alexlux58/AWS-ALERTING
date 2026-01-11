@@ -23,6 +23,12 @@
 
 ## What is This?
 
+
+
+https://github.com/user-attachments/assets/c5023568-e9ba-43ba-87b0-8e7da3050b0e
+
+
+
 This is a **production-ready AWS cost monitoring and alerting system** that:
 
 - 📧 **Sends you daily email reports** with your AWS spending breakdown
